@@ -37,6 +37,21 @@ def correct_text(text):
     )
     return response.choices[0].message.content.strip()
 
+def save_window_geometry(root):
+    geometry = root.geometry()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    work_path = os.path.join(script_dir, 'work.json')
+    with open(work_path, 'w') as f:
+        json.dump({"geometry": geometry}, f)
+
+def load_window_geometry(root):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    work_path = os.path.join(script_dir, 'work.json')
+    if os.path.exists(work_path):
+        with open(work_path, 'r') as f:
+            data = json.load(f)
+            root.geometry(data["geometry"])
+
 class TextCorrectionApp:
     def __init__(self, master):
         self.master = master
@@ -84,8 +99,9 @@ class TextCorrectionApp:
 
 def main():
     root = tk.Tk()
-    root.geometry("500x500")  # 初期ウィンドウサイズを設定
+    load_window_geometry(root)
     app = TextCorrectionApp(root)
+    root.protocol("WM_DELETE_WINDOW", lambda: (save_window_geometry(root), root.destroy()))
     root.mainloop()
 
 if __name__ == "__main__":
