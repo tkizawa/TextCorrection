@@ -1,9 +1,11 @@
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, ttk
 from openai import AzureOpenAI
 import pyperclip
 import json
 import os
+import threading
+import time
 
 # 設定ファイルの読み込み
 def load_settings():
@@ -22,12 +24,42 @@ client = AzureOpenAI(
     api_version="2023-05-15"
 )
 
-def correct_text(text):
+def split_text(text, max_tokens=3000):
+    words = text.split()
+    chunks = []
+    current_chunk = []
+    current_length = 0
+
+    for word in words:
+        word_length = len(word) + 1  # +1 for space
+        if current_length + word_length > max_tokens:
+            chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+            current_length = word_length
+        else:
+            current_chunk.append(word)
+            current_length += word_length
+
+    if current_chunk:
+        chunks.append(' '.join(current_chunk))
+
+    return chunks
+
+def process_text_chunk(chunk, mode):
+    if mode == "校正":
+        system_message = "あなたは優秀な文書校正者です。与えられたテキストを校正し、改善してください。"
+        user_message = f"以下のテキストを校正してください：\n\n{chunk}"
+    elif mode == "要約":
+        system_message = "あなたは優秀な文書要約者です。与えられたテキストを簡潔に要約してください。"
+        user_message = f"以下のテキストを要約してください：\n\n{chunk}"
+    else:
+        raise ValueError("Invalid mode")
+
     response = client.chat.completions.create(
         model=settings['DEPLOYMENT_NAME'],
         messages=[
-            {"role": "system", "content": "あなたは優秀な文書校正者です。与えられたテキストを校正し、改善してください。"},
-            {"role": "user", "content": f"以下のテキストを校正してください：\n\n{text}"}
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message}
         ],
         temperature=0.7,
         max_tokens=800,
@@ -35,7 +67,21 @@ def correct_text(text):
         frequency_penalty=0,
         presence_penalty=0
     )
+
     return response.choices[0].message.content.strip()
+
+def process_text(text, mode, progress_callback):
+    chunks = split_text(text)
+    results = []
+    
+    for i, chunk in enumerate(chunks):
+        result = process_text_chunk(chunk, mode)
+        results.append(result)
+        progress = int((i + 1) / len(chunks) * 100)
+        progress_callback(progress)
+        time.sleep(0.1)  # 進捗バーの動きを見せるための短い遅延
+
+    return "\n\n".join(results)
 
 def save_window_geometry(root):
     geometry = root.geometry()
@@ -52,15 +98,15 @@ def load_window_geometry(root):
             data = json.load(f)
             root.geometry(data["geometry"])
 
-class TextCorrectionApp:
+class TextProcessingApp:
     def __init__(self, master):
         self.master = master
-        master.title("テキスト校正アプリケーション")
+        master.title("テキスト処理アプリケーション")
 
         # ウィンドウのサイズ変更に対応
         master.columnconfigure(0, weight=1)
         master.rowconfigure(1, weight=1)
-        master.rowconfigure(4, weight=1)
+        master.rowconfigure(6, weight=1)
 
         # 入力テキストエリア
         self.input_label = tk.Label(master, text="入力テキスト:")
@@ -68,39 +114,73 @@ class TextCorrectionApp:
         self.input_text = scrolledtext.ScrolledText(master, height=10, width=50)
         self.input_text.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
-        # 校正ボタン
-        self.correct_button = tk.Button(master, text="校正", command=self.correct_text)
-        self.correct_button.grid(row=2, column=0, pady=5)
+        # 処理モード選択
+        self.mode_label = tk.Label(master, text="処理モード:")
+        self.mode_label.grid(row=2, column=0, sticky="w", padx=5, pady=5)
+        self.mode_var = tk.StringVar(value="校正")
+        self.mode_dropdown = ttk.Combobox(master, textvariable=self.mode_var, values=["校正", "要約"])
+        self.mode_dropdown.grid(row=2, column=0, padx=5, pady=5)
+
+        # 処理ボタン
+        self.process_button = tk.Button(master, text="処理", command=self.process_text)
+        self.process_button.grid(row=3, column=0, pady=5)
+
+        # 進捗バー
+        self.progress = ttk.Progressbar(master, orient="horizontal", length=300, mode="determinate")
+        self.progress.grid(row=4, column=0, pady=5)
 
         # 結果表示エリア
-        self.output_label = tk.Label(master, text="校正結果:")
-        self.output_label.grid(row=3, column=0, sticky="w", padx=5, pady=5)
+        self.output_label = tk.Label(master, text="処理結果:")
+        self.output_label.grid(row=5, column=0, sticky="w", padx=5, pady=5)
         self.output_text = scrolledtext.ScrolledText(master, height=10, width=50)
-        self.output_text.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
+        self.output_text.grid(row=6, column=0, sticky="nsew", padx=5, pady=5)
 
         # クリアボタン
         self.clear_button = tk.Button(master, text="クリア", command=self.clear_text)
-        self.clear_button.grid(row=5, column=0, pady=5)
+        self.clear_button.grid(row=7, column=0, pady=5)
 
-    def correct_text(self):
+    def process_text(self):
         input_text = self.input_text.get("1.0", tk.END).strip()
+        mode = self.mode_var.get()
         if input_text:
-            corrected_text = correct_text(input_text)
-            self.output_text.delete("1.0", tk.END)
-            self.output_text.insert(tk.END, corrected_text)
-            pyperclip.copy(corrected_text)
-            print("校正結果をクリップボードにコピーしました。")
+            self.process_button.config(state=tk.DISABLED)
+            self.progress["value"] = 0
+            threading.Thread(target=self.process_text_thread, args=(input_text, mode)).start()
         else:
             print("テキストが入力されていません。")
+
+    def process_text_thread(self, input_text, mode):
+        try:
+            processed_text = process_text(input_text, mode, self.update_progress)
+            self.master.after(0, self.update_output, processed_text)
+            self.master.after(0, self.update_progress, 100)
+        except Exception as e:
+            error_message = f"エラーが発生しました: {str(e)}"
+            self.master.after(0, self.update_output, error_message)
+        finally:
+            self.master.after(0, self.enable_process_button)
+
+    def update_progress(self, value):
+        self.progress["value"] = value
+
+    def update_output(self, text):
+        self.output_text.delete("1.0", tk.END)
+        self.output_text.insert(tk.END, text)
+        pyperclip.copy(text)
+        print(f"{self.mode_var.get()}結果をクリップボードにコピーしました。")
+
+    def enable_process_button(self):
+        self.process_button.config(state=tk.NORMAL)
 
     def clear_text(self):
         self.input_text.delete("1.0", tk.END)
         self.output_text.delete("1.0", tk.END)
+        self.progress["value"] = 0
 
 def main():
     root = tk.Tk()
     load_window_geometry(root)
-    app = TextCorrectionApp(root)
+    app = TextProcessingApp(root)
     root.protocol("WM_DELETE_WINDOW", lambda: (save_window_geometry(root), root.destroy()))
     root.mainloop()
 
