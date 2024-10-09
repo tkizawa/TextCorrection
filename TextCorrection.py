@@ -6,23 +6,35 @@ import json
 import os
 import threading
 import time
+import queue
 
 # 設定ファイルの読み込み
 def load_settings():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    settings_path = os.path.join(script_dir, 'setting.json')
-    with open(settings_path, 'r') as f:
-        return json.load(f)
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        settings_path = os.path.join(script_dir, 'setting.json')
+        with open(settings_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"設定ファイルの読み込み中にエラーが発生しました: {e}")
+        return None
 
 # 設定の読み込み
 settings = load_settings()
+if not settings:
+    print("設定ファイルを確認してください。")
+    exit(1)
 
 # Azure OpenAI クライアントの設定
-client = AzureOpenAI(
-    azure_endpoint=settings['AZURE_OPENAI_ENDPOINT'],
-    api_key=settings['AZURE_OPENAI_KEY'],
-    api_version="2023-05-15"
-)
+try:
+    client = AzureOpenAI(
+        azure_endpoint=settings['AZURE_OPENAI_ENDPOINT'],
+        api_key=settings['AZURE_OPENAI_KEY'],
+        api_version="2023-05-15"
+    )
+except Exception as e:
+    print(f"Azure OpenAI クライアントの初期化中にエラーが発生しました: {e}")
+    exit(1)
 
 def split_text(text, max_tokens=3000):
     words = text.split()
@@ -135,9 +147,11 @@ class TextProcessingApp:
         self.output_text = scrolledtext.ScrolledText(master, height=10, width=50)
         self.output_text.grid(row=6, column=0, sticky="nsew", padx=5, pady=5)
 
-        # クリアボタン
+        # コピー・クリアボタン
+        self.copy_button = tk.Button(master, text="コピー", command=self.copy_to_clipboard)
+        self.copy_button.grid(row=7, column=0, pady=5)
         self.clear_button = tk.Button(master, text="クリア", command=self.clear_text)
-        self.clear_button.grid(row=7, column=0, pady=5)
+        self.clear_button.grid(row=8, column=0, pady=5)
 
     def process_text(self):
         input_text = self.input_text.get("1.0", tk.END).strip()
@@ -176,6 +190,11 @@ class TextProcessingApp:
         self.input_text.delete("1.0", tk.END)
         self.output_text.delete("1.0", tk.END)
         self.progress["value"] = 0
+
+    def copy_to_clipboard(self):
+        text = self.output_text.get("1.0", tk.END).strip()
+        pyperclip.copy(text)
+        print("出力結果をクリップボードにコピーしました。")
 
 def main():
     root = tk.Tk()
