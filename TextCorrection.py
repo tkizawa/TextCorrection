@@ -6,7 +6,6 @@ import json
 import os
 import threading
 import time
-import queue
 
 # 設定ファイルの読み込み
 def load_settings():
@@ -64,6 +63,9 @@ def process_text_chunk(chunk, mode):
     elif mode == "要約":
         system_message = "あなたは優秀な文書要約者です。与えられたテキストを簡潔に要約してください。"
         user_message = f"以下のテキストを要約してください：\n\n{chunk}"
+    elif mode == "翻訳":
+        system_message = "あなたは優秀な翻訳者です。与えられた英語のテキストを日本語に翻訳してください。"
+        user_message = f"以下の英語テキストを日本語に翻訳してください：\n\n{chunk}"
     else:
         raise ValueError("Invalid mode")
 
@@ -130,7 +132,7 @@ class TextProcessingApp:
         self.mode_label = tk.Label(master, text="処理モード:")
         self.mode_label.grid(row=2, column=0, sticky="w", padx=5, pady=5)
         self.mode_var = tk.StringVar(value="校正")
-        self.mode_dropdown = ttk.Combobox(master, textvariable=self.mode_var, values=["校正", "要約"])
+        self.mode_dropdown = ttk.Combobox(master, textvariable=self.mode_var, values=["校正", "要約", "翻訳"])
         self.mode_dropdown.grid(row=2, column=0, padx=5, pady=5)
 
         # 処理ボタン
